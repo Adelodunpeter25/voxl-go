@@ -217,7 +217,13 @@ pub unsafe extern "C" fn voxl_session_send_mouse(
     for (bit, button) in [(0u32, 1u8), (1, 2), (2, 3), (3, 8), (4, 9)] {
         let (was, now) = (old >> bit & 1, button_mask >> bit & 1);
         if was != now {
-            rc = send(s, InputEvent::Button { button, down: now == 1 });
+            rc = send(
+                s,
+                InputEvent::Button {
+                    button,
+                    down: now == 1,
+                },
+            );
         }
     }
     if wheel != 0 {
@@ -234,7 +240,13 @@ pub unsafe extern "C" fn voxl_session_send_key(
     down: i32,
 ) -> i32 {
     match session.as_ref() {
-        Some(s) => send(s, InputEvent::Key { keysym, down: down != 0 }),
+        Some(s) => send(
+            s,
+            InputEvent::Key {
+                keysym,
+                down: down != 0,
+            },
+        ),
         None => VOXL_ERR_ARG,
     }
 }

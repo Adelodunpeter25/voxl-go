@@ -50,7 +50,11 @@ jobs:
           ldd $d/libvoxl.so
           if ldd $d/libvoxl.so | grep -E 'x264|opus|yuv|pulse'; then echo "::error::dependency not linked statically"; exit 1; fi
       - uses: actions/upload-artifact@v4
-        with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
+        with:
+          {
+            name: 'libs-${{ matrix.target }}',
+            path: 'libs/${{ matrix.target }}',
+          }
 
   linux-musl:
     name: ${{ matrix.target }}
@@ -83,7 +87,11 @@ jobs:
           readelf -d $d/libvoxl.so | grep NEEDED
           if readelf -d $d/libvoxl.so | grep -E 'x264|opus|yuv'; then echo "::error::dependency not linked statically"; exit 1; fi
       - uses: actions/upload-artifact@v4
-        with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
+        with:
+          {
+            name: 'libs-${{ matrix.target }}',
+            path: 'libs/${{ matrix.target }}',
+          }
 
   macos:
     name: ${{ matrix.target }}
@@ -115,7 +123,11 @@ jobs:
           otool -L $d/libvoxl.dylib
           if otool -L $d/libvoxl.dylib | grep -E '/opt/homebrew|/usr/local|x264|opus'; then echo "::error::links a non-system dylib"; exit 1; fi
       - uses: actions/upload-artifact@v4
-        with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
+        with:
+          {
+            name: 'libs-${{ matrix.target }}',
+            path: 'libs/${{ matrix.target }}',
+          }
 
   commit:
     needs: [linux-gnu, linux-musl, macos]
