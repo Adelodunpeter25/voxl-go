@@ -374,3 +374,21 @@ encoding on macOS is in progress.
 
 **What's the license?** voxl's code is MIT. It links x264, which is GPL-2.0, so a voxl
 binary, and anything that bundles one, is distributed under the GPL.
+
+## Using voxl from Go
+
+The Go package `github.com/Adelodunpeter25/voxl-go` links the prebuilt, self-contained
+`libs/<target-triple>/libvoxl.so` (Linux) or `libvoxl.dylib` (macOS); no Rust or C
+compilation happens during `go build`.
+
+- **Linux:** the library is found through an rpath to the module's `libs/<triple>`
+  directory and through `$ORIGIN`, so a binary run from the directory that holds
+  `libvoxl.so` works as is. Build with `-tags musl` for the musl libraries.
+- **macOS:** cgo refuses `-Wl,-rpath,@executable_path` in `#cgo LDFLAGS` (it rejects
+  rpath values starting with `@`), so the package only sets an rpath to the module's own
+  `libs/<triple>` directory. To run a binary from elsewhere, copy `libvoxl.dylib` next to
+  it and add the rpath when you link:
+
+  ```sh
+  go build -ldflags="-extldflags '-Wl,-rpath,@executable_path'"
+  ```
