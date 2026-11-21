@@ -29,6 +29,8 @@ include = [
 [lib]
 name = "voxl"
 path = "src/lib.rs"
+# rlib for the binary and embedders, staticlib/cdylib for the C ABI (src/ffi.rs).
+crate-type = ["rlib", "staticlib", "cdylib"]
 
 [[bin]]
 name = "voxl"

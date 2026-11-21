@@ -1,0 +1,115 @@
+name: Build libs
+
+# Builds a self-contained libvoxl.so / libvoxl.dylib (x264, opus and libyuv linked in
+# statically) per target and commits it to libs/<target-triple>/ for the Go module.
+# Built without the pulseaudio feature: the C API streams video and takes input only, and
+# this keeps libpulse out of the library's dependencies.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    # The commit job pushes libs/ back to main; don't rebuild because of it.
+    paths-ignore: ['libs/**', '**.md']
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  PKG_CONFIG_ALL_STATIC: '1'
+
+jobs:
+  linux-gnu:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          # Native arm64 runner: no cross-compilation sysroot to maintain.
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libx264-dev libyuv-dev libopus-dev libclang-dev pkg-config
+      - run: cargo build --release --lib --locked --no-default-features
+      - name: Collect and check
+        run: |
+          d=libs/${{ matrix.target }}; mkdir -p $d
+          cp target/release/libvoxl.so target/release/libvoxl.a $d/
+          ldd $d/libvoxl.so
+          # Only the C library may be needed.
+          if ldd $d/libvoxl.so | grep -E 'x264|opus|yuv|pulse'; then echo "::error::dependency not linked statically"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
+
+  linux-musl:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-22.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      # Alpine is musl natively, so its packages are the right ones to link.
+      - name: Build in Alpine
+        run: |
+          docker run --rm -e PKG_CONFIG_ALL_STATIC=1 -v "$PWD:/w" -w /w alpine:3.22 sh -ec '
+            apk add --no-cache rust cargo build-base pkgconf clang-dev x264-dev opus-dev libyuv-dev
+            # A cdylib on musl needs the C runtime linked dynamically.
+            RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --lib --locked --no-default-features
+          '
+      - name: Collect and check
+        run: |
+          d=libs/${{ matrix.target }}; mkdir -p $d
+          sudo cp target/release/libvoxl.so target/release/libvoxl.a $d/
+          sudo chown -R $USER $d
+          if readelf -d $d/libvoxl.so | grep -E 'x264|opus|yuv'; then echo "::error::dependency not linked statically"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
+
+  macos:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-13 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: brew install x264 opus libyuv pkg-config
+      - run: cargo build --release --lib --locked --no-default-features
+      - name: Collect and check
+        run: |
+          d=libs/${{ matrix.target }}; mkdir -p $d
+          cp target/release/libvoxl.dylib target/release/libvoxl.a $d/
+          # Found through the rpath the Go module adds, not the build machine's path.
+          install_name_tool -id @rpath/libvoxl.dylib $d/libvoxl.dylib
+          otool -L $d/libvoxl.dylib
+          if otool -L $d/libvoxl.dylib | grep -E '/opt/homebrew|/usr/local'; then echo "::error::links a Homebrew dylib"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
+
+  commit:
+    needs: [linux-gnu, linux-musl, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'libs-*', path: libs }
+      - name: Flatten and commit
+        run: |
+          for d in libs/libs-*; do rm -rf "libs/${d#libs/libs-}"; mv "$d" "libs/${d#libs/libs-}"; done
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add -f libs
+          git commit -m "Update prebuilt libs" || exit 0
+          git push
