@@ -1,9 +1,9 @@
 name: Build libs
 
-# Builds a self-contained libvoxl.so / libvoxl.dylib (x264, opus and libyuv linked in
-# statically) per target and commits it to libs/<target-triple>/ for the Go module.
-# Built without the pulseaudio feature: the C API streams video and takes input only, and
-# this keeps libpulse out of the library's dependencies.
+# Builds a self-contained libvoxl.so / libvoxl.dylib per target (x264, Opus and libyuv are
+# compiled from source by scripts/build-deps.sh and linked in statically) and commits it to
+# libs/<target-triple>/ for the Go module. Built without the pulseaudio feature: the C API
+# streams video and takes input only, and this keeps libpulse out of the dependencies.
 on:
   workflow_dispatch:
   push:
@@ -14,9 +14,6 @@ on:
 
 permissions:
   contents: write
-
-env:
-  PKG_CONFIG_ALL_STATIC: '1'
 
 jobs:
   linux-gnu:
@@ -32,16 +29,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: sudo apt-get update && sudo apt-get install -y libx264-dev libyuv-dev libopus-dev libclang-dev pkg-config
+      - run: sudo apt-get update && sudo apt-get install -y cmake nasm libclang-dev pkg-config
       # build.rs bundles web/src with esbuild.
       - run: npm install -g esbuild
-      - run: cargo build --release --lib --locked --no-default-features
+      - run: scripts/build-deps.sh "$PWD/deps"
+      - name: Build
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/deps/lib/pkgconfig
+          PKG_CONFIG_ALL_STATIC: '1'
+          # libyuv has no .pc file and is C++.
+          RUSTFLAGS: -L native=${{ github.workspace }}/deps/lib -C link-arg=-lstdc++
+        run: cargo build --release --lib --locked --no-default-features
       - name: Collect and check
         run: |
           d=libs/${{ matrix.target }}; mkdir -p $d
           cp target/release/libvoxl.so target/release/libvoxl.a $d/
           ldd $d/libvoxl.so
-          # Only the C library may be needed.
           if ldd $d/libvoxl.so | grep -E 'x264|opus|yuv|pulse'; then echo "::error::dependency not linked statically"; exit 1; fi
       - uses: actions/upload-artifact@v4
         with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
@@ -57,19 +60,23 @@ jobs:
           - { target: aarch64-unknown-linux-musl, os: ubuntu-22.04-arm }
     steps:
       - uses: actions/checkout@v4
-      # Alpine is musl natively, so its packages are the right ones to link.
+      # Alpine is musl natively, so the library built there is a real musl one.
       - name: Build in Alpine
         run: |
-          docker run --rm -e PKG_CONFIG_ALL_STATIC=1 -v "$PWD:/w" -w /w alpine:3.22 sh -ec '
-            apk add --no-cache rust cargo build-base pkgconf clang-dev x264-dev opus-dev libyuv-dev esbuild
+          docker run --rm -v "$PWD:/w" -w /w alpine:3.22 sh -ec '
+            apk add --no-cache rust cargo build-base pkgconf clang-dev cmake nasm git esbuild linux-headers
+            scripts/build-deps.sh /w/deps
+            export PKG_CONFIG_PATH=/w/deps/lib/pkgconfig PKG_CONFIG_ALL_STATIC=1
             # A cdylib on musl needs the C runtime linked dynamically.
-            RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --lib --locked --no-default-features
+            export RUSTFLAGS="-C target-feature=-crt-static -L native=/w/deps/lib -C link-arg=-lstdc++"
+            cargo build --release --lib --locked --no-default-features
           '
       - name: Collect and check
         run: |
           d=libs/${{ matrix.target }}; mkdir -p $d
           sudo cp target/release/libvoxl.so target/release/libvoxl.a $d/
           sudo chown -R $USER $d
+          readelf -d $d/libvoxl.so | grep NEEDED
           if readelf -d $d/libvoxl.so | grep -E 'x264|opus|yuv'; then echo "::error::dependency not linked statically"; exit 1; fi
       - uses: actions/upload-artifact@v4
         with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
@@ -86,8 +93,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: brew install x264 opus libyuv pkg-config esbuild
-      - run: cargo build --release --lib --locked --no-default-features
+      - run: brew install cmake nasm pkg-config esbuild
+      - run: scripts/build-deps.sh "$PWD/deps"
+      - name: Build
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/deps/lib/pkgconfig
+          PKG_CONFIG_ALL_STATIC: '1'
+          RUSTFLAGS: -L native=${{ github.workspace }}/deps/lib
+        run: cargo build --release --lib --locked --no-default-features
       - name: Collect and check
         run: |
           d=libs/${{ matrix.target }}; mkdir -p $d
@@ -95,7 +108,7 @@ jobs:
           # Found through the rpath the Go module adds, not the build machine's path.
           install_name_tool -id @rpath/libvoxl.dylib $d/libvoxl.dylib
           otool -L $d/libvoxl.dylib
-          if otool -L $d/libvoxl.dylib | grep -E '/opt/homebrew|/usr/local'; then echo "::error::links a Homebrew dylib"; exit 1; fi
+          if otool -L $d/libvoxl.dylib | grep -E '/opt/homebrew|/usr/local|x264|opus'; then echo "::error::links a non-system dylib"; exit 1; fi
       - uses: actions/upload-artifact@v4
         with: { name: 'libs-${{ matrix.target }}', path: 'libs/${{ matrix.target }}' }
 
