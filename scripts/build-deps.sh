@@ -25,6 +25,8 @@ if [ "$(uname -s)" != Darwin ]; then
   cmake -S "$SRC/libyuv" -B "$SRC/libyuv/b" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON
   cmake --build "$SRC/libyuv/b" -j"$JOBS" && cmake --install "$SRC/libyuv/b"
+  # libyuv always installs a shared copy too, which the linker would prefer.
+  rm -f "$PREFIX"/lib*/libyuv.so*
   # install may write lib64 or lib; build.rs links libyuv from the default path.
   [ -d "$PREFIX/lib64" ] && cp -n "$PREFIX"/lib64/libyuv.a "$PREFIX/lib/" || true
 fi

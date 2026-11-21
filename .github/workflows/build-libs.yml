@@ -64,7 +64,7 @@ jobs:
       - name: Build in Alpine
         run: |
           docker run --rm -v "$PWD:/w" -w /w alpine:3.22 sh -ec '
-            apk add --no-cache rust cargo build-base pkgconf clang-dev cmake nasm git esbuild linux-headers
+            apk add --no-cache rust cargo build-base pkgconf clang-dev cmake nasm git esbuild linux-headers bash
             scripts/build-deps.sh /w/deps
             export PKG_CONFIG_PATH=/w/deps/lib/pkgconfig PKG_CONFIG_ALL_STATIC=1
             # A cdylib on musl needs the C runtime linked dynamically.
