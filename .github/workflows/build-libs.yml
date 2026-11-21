@@ -43,7 +43,10 @@ jobs:
       - name: Collect and check
         run: |
           d=libs/${{ matrix.target }}; mkdir -p $d
-          cp target/release/libvoxl.so target/release/libvoxl.a $d/
+          # The static archive is 150-200 MB (over GitHub's 100 MB file limit) and the Go
+          # module links the shared library, so only that is shipped.
+          cp target/release/libvoxl.so $d/
+          strip --strip-unneeded $d/libvoxl.so
           ldd $d/libvoxl.so
           if ldd $d/libvoxl.so | grep -E 'x264|opus|yuv|pulse'; then echo "::error::dependency not linked statically"; exit 1; fi
       - uses: actions/upload-artifact@v4
@@ -74,8 +77,9 @@ jobs:
       - name: Collect and check
         run: |
           d=libs/${{ matrix.target }}; mkdir -p $d
-          sudo cp target/release/libvoxl.so target/release/libvoxl.a $d/
+          sudo cp target/release/libvoxl.so $d/
           sudo chown -R $USER $d
+          strip --strip-unneeded $d/libvoxl.so || true
           readelf -d $d/libvoxl.so | grep NEEDED
           if readelf -d $d/libvoxl.so | grep -E 'x264|opus|yuv'; then echo "::error::dependency not linked statically"; exit 1; fi
       - uses: actions/upload-artifact@v4
@@ -104,7 +108,8 @@ jobs:
       - name: Collect and check
         run: |
           d=libs/${{ matrix.target }}; mkdir -p $d
-          cp target/release/libvoxl.dylib target/release/libvoxl.a $d/
+          cp target/release/libvoxl.dylib $d/
+          strip -x $d/libvoxl.dylib
           # Found through the rpath the Go module adds, not the build machine's path.
           install_name_tool -id @rpath/libvoxl.dylib $d/libvoxl.dylib
           otool -L $d/libvoxl.dylib
